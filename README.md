@@ -1,60 +1,103 @@
-# LearningRAG
+# Scalable Retrieval-Augmented Generation (RAG) Application
 
-This workspace demonstrates a simple Retrieval-Augmented Generation (RAG) pipeline using Qdrant, LangChain, and Google's Gemini model, with a minimal React frontend.
+This repository contains a scalable RAG application built around a queue-based
+architecture. The code lives primarily in the `rag_queue` package and demonstrates
+how to decouple document ingestion, vector indexing, and query processing using
+RQ (Redis Queue) workers.
 
-## Backend
+## Features
 
-### Setup
+- **Scalable design**: ingestion and chat workers operate independently and can
+  be scaled horizontally.
+- **Queue-driven processing** using RQ and Redis.
+- **Vector store** backed by Qdrant (configured via `docker-compose.yml`).
+- **Client-server separation**: the HTTP API is provided by `rag_queue.server`,
+  while workers live in `rag_queue.worker` and `rag_queue.worker_runner`.
+- **Simple Python-only stack** with minimal external dependencies.
 
-1. Create a virtual environment and install dependencies:
-
-```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-```
-
-The requirements file includes `sentence-transformers` (for embeddings), `langchain-huggingface` (updated embedding class) and the new `google-genai` SDK instead of the deprecated `google-generativeai`.
-
-2. Ensure Qdrant is running locally (`docker-compose.yml` can be used).
-3. Put your Gemini API key in `.env`:
+## Repository structure
 
 ```
-gemini_API_Key=YOUR_KEY_HERE
+rag_queue/              # application package
+    __init__.py
+    main.py             # entrypoint for starting components
+    server.py           # Flask/FastAPI (or similar) HTTP interface
+    worker_runner.py    # helper to start RQ workers
+    client/             # helpers for enqueuing jobs
+        rq_client.py
+    queues/             # job definitions
+        __init__.py
+        worker.py        # actual work performed by RQ workers
 ```
 
-### Running
+Other top‑level files include `requirements.txt`, `docker-compose.yml`, and this
+README.
 
-```bash
-python app.py
-```
+## Getting started
 
-The server listens on `http://localhost:5000` and exposes:
+1. **Install dependencies**:
 
-- `POST /chat` with JSON `{ "query": "..." }` returns `{ "response": "..." }`.
+   ```sh
+   python -m venv venv
+   venv\\Scripts\\activate      # on Windows
+   pip install -r requirements.txt
+   ```
 
-The server prints a warning at startup if it cannot reach the Qdrant instance; you can still start the app but the `/chat` route will return a 503 until the vector database is available.
+2. **Run Redis & Qdrant**:
 
-> ⚠️ The backend now uses the `google-genai` client (`genai.Client`) instead of the deprecated `google.generativeai`. It also uses the new `HuggingFaceEmbeddings` class from `langchain_huggingface`, so the `sentence-transformers` package is required.
-## Frontend
+   ```sh
+   docker-compose up -d
+   ```
 
-A Vite + React app lives in the `client/` directory.
+3. **Configure environment**:
 
-### Setup & run
+   Create a `.env` file with your API keys and other settings. For example:
 
-```bash
-cd client
-npm install    # dependencies already installed by scaffolder
-npm run dev
-```
+   ```env
+   GEMINI_API_KEY=your_key_here
+   ```
 
-Open `http://localhost:5173` in your browser. Enter a question and press **Send**.
+4. **Start the server**:
 
-## Structure
+   ```sh
+   python -m rag_queue.server
+   ```
 
-- `app.py` – Flask server with retrieval and Gemini call.
-- `chat.py` – original console-based helper (can still be used standalone).
-- `client/` – React/Vite UI with minimal chat form.
+   The HTTP API listens on `http://localhost:5000` by default. It exposes
+   endpoints for submitting documents, triggering re‑indexing, and querying the
+   RAG system.
+
+5. **Run workers**:
+
+   ```sh
+   python -m rag_queue.worker_runner
+   ```
+
+   This command starts the RQ workers that process ingestion and chat jobs. You
+   can run multiple instances of the runner on different machines to scale the
+   workload.
+
+## Usage
+
+- **Ingest documents**: POST them to the server or use the Python client in
+  `rag_queue.client.rq_client` to enqueue ingestion jobs.
+- **Ask questions**: send a request to the `/chat` endpoint; the server will
+  enqueue a query job and return the response once a worker processes it.
+
+## Development tips
+
+- Modify `rag_queue/queues/worker.py` to change how documents are embedded or
+  how responses are generated.
+- Adjust the RQ queue names in `worker_runner.py` when adding new job types.
+
+## Deployment
+
+- Use the provided `docker-compose.yml` for local development; in production you
+  can swap Redis/Qdrant services with managed equivalents.
+- Horizontal scaling is achieved by running additional `worker_runner` processes
+  and/or copying the `server` container behind a load balancer.
 
 ---
 
+For more details on the original prototype and architecture rationale, see the
+previous README history in Git.
